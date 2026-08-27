@@ -6,10 +6,9 @@ describe("collaboration transcript markers", () => {
   it("shows the peer avatar in an accessible message marker", () => {
     const html = renderToString(
       <CollaborationMarker
-        action="Message from"
         ariaLabel="Message from Research"
         color="#14B8A6"
-        name="Research"
+        label="Message from Research"
         onClick={() => undefined}
       />,
     );

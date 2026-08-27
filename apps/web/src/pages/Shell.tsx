@@ -3970,10 +3970,9 @@ const MessageView = memo(function MessageView({
           return (
             <CollaborationMarker
               key={i}
-              action={sent ? <Trans>Messaged</Trans> : <Trans>Message from</Trans>}
               ariaLabel={label}
               color={peerBot(peerBotId)?.color ?? "#85858A"}
-              name={peer}
+              label={label}
               onClick={() => onOpenPeerMessages(peerBotId)}
             />
           );
