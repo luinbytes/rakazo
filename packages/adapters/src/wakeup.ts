@@ -42,38 +42,76 @@ export class GraphileJobPublisher implements JobPublisher {
 }
 
 export class GraphileJobWorkerHost implements JobWorkerHost {
-  private runner: Runner | undefined;
+  private runners: Runner[] = [];
+  private starting: Promise<void> | undefined;
 
   constructor(
     private readonly connectionString: string,
     private readonly options: {
       concurrency?: number;
+      controlConcurrency?: number;
       pollInterval?: number;
       noHandleSignals?: boolean;
     } = {},
   ) {}
 
   async start(handlers: BackgroundJobHandlers): Promise<void> {
-    if (this.runner) return;
+    if (this.starting) return this.starting;
+    if (this.runners.length) return;
+    this.starting = this.startPools(handlers).finally(() => {
+      this.starting = undefined;
+    });
+    return this.starting;
+  }
+
+  private async startPools(handlers: BackgroundJobHandlers): Promise<void> {
+    const concurrency = this.options.concurrency ?? 4;
+    const controlConcurrency = this.options.controlConcurrency ?? 1;
+    for (const count of [concurrency, controlConcurrency]) {
+      if (!Number.isSafeInteger(count) || count < 1) throw new Error("Invalid worker concurrency");
+    }
     const taskList = Object.fromEntries(
       Object.keys(handlers).map((name) => [
         name,
         async (payload: unknown) => dispatchBackgroundJob(handlers, name, payload),
       ]),
     );
-    this.runner = await run({
-      connectionString: this.connectionString,
-      concurrency: this.options.concurrency ?? 4,
-      pollInterval: this.options.pollInterval ?? 500,
-      noHandleSignals: this.options.noHandleSignals,
-      taskList,
-    });
+    // Long agent/LLM calls cannot consume the capacity reserved for lifecycle work.
+    // Graphile still owns claiming, retries and queue locks in both bounded pools.
+    const isLongTask = (name: string) => name === "run.continue" || name === "history.compact";
+    try {
+      for (const longTasks of [true, false]) {
+        const tasks = Object.fromEntries(
+          Object.entries(taskList).filter(([name]) => isLongTask(name) === longTasks),
+        );
+        if (!Object.keys(tasks).length) continue;
+        this.runners.push(
+          await run({
+            connectionString: this.connectionString,
+            concurrency: longTasks ? concurrency : controlConcurrency,
+            pollInterval: this.options.pollInterval ?? 500,
+            noHandleSignals: this.options.noHandleSignals,
+            taskList: tasks,
+          }),
+        );
+      }
+    } catch (error) {
+      await this.stopPools();
+      throw error;
+    }
+  }
+
+  private async stopPools(): Promise<void> {
+    const runners = this.runners;
+    this.runners = [];
+    const results = await Promise.allSettled(runners.map((runner) => runner.stop()));
+    const failed = results.find((result) => result.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
   }
 
   async stop(): Promise<void> {
-    const runner = this.runner;
-    this.runner = undefined;
-    await runner?.stop();
+    await this.starting?.catch(() => undefined);
+    await this.stopPools();
   }
 }
 

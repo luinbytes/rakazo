@@ -31,6 +31,58 @@ async function waitFor(assertion: () => void, timeoutMs = 10_000): Promise<void>
 }
 
 describePostgres("Graphile background jobs (PostgreSQL contract)", () => {
+  it("dispatches lifecycle jobs while all four long-work slots are occupied", async () => {
+    const publisher = new GraphileJobPublisher(databaseUrl!);
+    const host = new GraphileJobWorkerHost(databaseUrl!, {
+      pollInterval: 25,
+      noHandleSignals: true,
+    });
+    const release = deferred();
+    let active = 0;
+    const target = handlers({
+      "run.continue": async () => {
+        active += 1;
+        await release.promise;
+        active -= 1;
+      },
+    });
+    try {
+      await host.start(target);
+      for (let index = 0; index < 5; index += 1) {
+        await publisher.enqueue({
+          name: "run.continue",
+          payload: { runId: `saturation-${index}` },
+        });
+      }
+      await waitFor(() => expect(active).toBe(4));
+      const started = performance.now();
+      await publisher.enqueue({
+        name: "routine.wakeup",
+        payload: { routineId: "due", scheduledFor: new Date().toISOString() },
+      });
+      await publisher.enqueue({
+        name: "computer.control-expire",
+        payload: { computerId: "computer", leaseId: "lease" },
+      });
+      await publisher.enqueue({ name: "computer.sleep", payload: { computerId: "computer" } });
+      await publisher.enqueue({ name: "skill.teaching-expire", payload: { skillId: "skill" } });
+      await waitFor(() => {
+        expect(target["routine.wakeup"]).toHaveBeenCalledOnce();
+        expect(target["computer.control-expire"]).toHaveBeenCalledOnce();
+        expect(target["computer.sleep"]).toHaveBeenCalledOnce();
+        expect(target["skill.teaching-expire"]).toHaveBeenCalledOnce();
+      });
+      expect(active).toBe(4);
+      console.info(
+        `worker evidence: lifecycle jobs dispatched in ${Math.round(performance.now() - started)}ms with four agent slots held`,
+      );
+    } finally {
+      release.resolve();
+      await host.stop();
+      await publisher.close();
+    }
+  });
+
   it("waits for an active handler during graceful shutdown", async () => {
     const publisher = new GraphileJobPublisher(databaseUrl!);
     const host = new GraphileJobWorkerHost(databaseUrl!, { concurrency: 1, pollInterval: 25 });
