@@ -1223,10 +1223,11 @@ export function ShellPage() {
     replyTarget && activeSnapshot?.messages.some((message) => message.id === replyTarget.id)
       ? replyTarget
       : null;
-  const currentRuns = activeThreadRuns(activeSnapshot);
+  const currentRuns = useMemo(() => activeThreadRuns(activeSnapshot), [activeSnapshot]);
   const answerableAskMessageId = latestAnswerableAskMessageId(activeSnapshot);
-  const workingRuns = currentRuns.filter((run) =>
-    ["running", "queued", "leased"].includes(run.status),
+  const workingRuns = useMemo(
+    () => currentRuns.filter((run) => ["running", "queued", "leased"].includes(run.status)),
+    [currentRuns],
   );
   const transcriptRunning = workingRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
@@ -1244,15 +1245,19 @@ export function ShellPage() {
     },
     [bots, transcriptMembers],
   );
-  const workingBots: GroupAvatarMember[] = workingRuns.map((run) => {
-    const bot = resolveTranscriptBot(run.botId);
-    return {
-      botId: run.botId,
-      color: bot?.color ?? "#85858A",
-      name: bot?.name,
-      status: run.status,
-    };
-  });
+  const workingBots = useMemo<GroupAvatarMember[]>(
+    () =>
+      workingRuns.map((run) => {
+        const bot = resolveTranscriptBot(run.botId);
+        return {
+          botId: run.botId,
+          color: bot?.color ?? "#85858A",
+          name: bot?.name,
+          status: run.status,
+        };
+      }),
+    [workingRuns, resolveTranscriptBot],
+  );
   const resolveTranscriptMemberName = useCallback(
     (botId: string | undefined) => memberName(transcriptMembers, botId),
     [transcriptMembers],
@@ -1401,6 +1406,10 @@ export function ShellPage() {
     initiallyScrolledThread.current = snapshot.threadId;
   }, [active, groupId, inGroup, snapshot?.botId, snapshot?.groupId, snapshot?.threadId]);
 
+  const openPeerMessages = useCallback((peerBotId: string) => {
+    setPeerMessagesFocusId(peerBotId);
+    setPeerMessagesOpen(true);
+  }, []);
   const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
   const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
   const jumpToReplyMessage = useCallback((messageId: string) => {
@@ -2404,10 +2413,7 @@ export function ShellPage() {
           onAnswer={answerMessage}
           onReply={setReplyTarget}
           onJumpToMessage={jumpToReplyMessage}
-          onOpenPeerMessages={(peerBotId) => {
-            setPeerMessagesFocusId(peerBotId);
-            setPeerMessagesOpen(true);
-          }}
+          onOpenPeerMessages={openPeerMessages}
           memberName={resolveTranscriptMemberName}
           peerBot={resolveTranscriptBot}
           onRefresh={refreshActiveThread}
@@ -3290,7 +3296,7 @@ export function ShellPage() {
   );
 }
 
-const Transcript = memo(function Transcript({
+export const Transcript = memo(function Transcript({
   scrollRef,
   artifactTarget,
   messages,
@@ -3497,7 +3503,7 @@ const Transcript = memo(function Transcript({
               onAddRoutine={onAddRoutine}
               voiceReady={voiceReady}
               speaking={speakingMessageId === message.id}
-              onSpeak={() => onSpeak(message)}
+              onSpeak={onSpeak}
             />
           </div>
         ))}
@@ -4249,7 +4255,7 @@ const MessageView = memo(function MessageView({
   onAddRoutine: (name: string, prompt: string) => void;
   voiceReady: boolean;
   speaking: boolean;
-  onSpeak: () => void;
+  onSpeak: (message: ThreadMessage) => void;
 }) {
   const { t } = useLingui();
   const isNarration =
@@ -4315,7 +4321,7 @@ const MessageView = memo(function MessageView({
               <button
                 type="button"
                 aria-label={speaking ? t`Stop speaking` : t`Speak this reply`}
-                onClick={onSpeak}
+                onClick={() => onSpeak(message)}
                 className="text-[12px] text-[#85858A] hover:text-[#ECECEE]"
               >
                 {speaking ? <Trans>Stop</Trans> : <Trans>Speak</Trans>}
@@ -4566,7 +4572,7 @@ const MessageView = memo(function MessageView({
                   <button
                     type="button"
                     aria-label={speaking ? t`Stop speaking` : t`Speak this reply`}
-                    onClick={onSpeak}
+                    onClick={() => onSpeak(message)}
                     className="mt-2 text-[12px] text-[#85858A] hover:text-[#ECECEE]"
                   >
                     {speaking ? <Trans>Stop</Trans> : <Trans>Speak</Trans>}

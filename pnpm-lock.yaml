@@ -210,6 +210,12 @@ importers:
       '@types/react':
         specifier: ^19.2.18
         version: 19.2.18
+      '@types/react-dom':
+        specifier: 19.2.4
+        version: 19.2.4(@types/react@19.2.18)
+      jsdom:
+        specifier: 30.0.1
+        version: 30.0.1(@noble/hashes@2.3.0)
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -298,6 +304,9 @@ importers:
       cross-env:
         specifier: ^10.1.0
         version: 10.1.0
+      jsdom:
+        specifier: 30.0.1
+        version: 30.0.1(@noble/hashes@2.3.0)
       tailwindcss:
         specifier: ^4.1.12
         version: 4.3.3
