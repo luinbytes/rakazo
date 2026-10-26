@@ -8,7 +8,7 @@ import {
 } from "./job-reconciler.js";
 
 function publisher() {
-  const enqueue = vi.fn(async (_job: BackgroundJob) => undefined);
+  const enqueue = vi.fn(async (_job: BackgroundJob): Promise<void> => undefined);
   const jobs: JobPublisher = {
     enqueue,
     cancel: async () => undefined,
@@ -133,7 +133,7 @@ describe("createJobReconciler", () => {
       computer: { findMany: computerFindMany },
     } as unknown as PrismaClient;
     const { jobs, enqueue } = publisher();
-    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2, maxPagesPerPass: 1 });
 
     await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
@@ -195,7 +195,7 @@ describe("createJobReconciler", () => {
       computer: { findMany: vi.fn(async () => []) },
     } as unknown as PrismaClient;
     const { jobs, enqueue } = publisher();
-    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2 });
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 2, maxPagesPerPass: 1 });
 
     await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
@@ -242,6 +242,90 @@ describe("createJobReconciler", () => {
         ],
       },
     });
+  });
+
+  it("publishes 1,000 recoverable runs in one bounded pass instead of ten intervals", async () => {
+    const at = new Date("2026-01-01T00:00:00Z");
+    const rows = Array.from({ length: 1_000 }, (_, index) => ({
+      id: `run-${String(index).padStart(4, "0")}`,
+      updatedAt: at,
+    }));
+    const prisma = fakePrisma();
+    const findMany = vi.mocked(prisma.run.findMany);
+    findMany.mockImplementation(((args: Parameters<typeof prisma.run.findMany>[0]) => {
+      const filter = args?.where?.AND as Array<{ OR?: Array<{ id?: { gt: string } }> }>;
+      const after = filter[1]?.OR?.[1]?.id?.gt;
+      return Promise.resolve(rows.filter((row) => !after || row.id > after).slice(0, 100));
+    }) as typeof prisma.run.findMany);
+    const { jobs, enqueue } = publisher();
+    const reconciler = createJobReconciler({ prisma, jobs });
+    await reconciler.reconcileOnce();
+    expect(enqueue).toHaveBeenCalledTimes(1_000);
+    expect(new Set(enqueue.mock.calls.map(([job]) => job.replaceKey)).size).toBe(1_000);
+    expect(findMany).toHaveBeenCalledTimes(10);
+    // Finished categories are not repeatedly scanned while another category drains.
+    expect(prisma.routine.findMany).toHaveBeenCalledOnce();
+    expect(prisma.computer.findMany).toHaveBeenCalledOnce();
+    console.info("reconciler evidence: 1,000 jobs, 10 pages, 1 pass; old interval floor 270,000ms");
+  });
+
+  it("bounds a busy pass and resumes its cursor on the next pass", async () => {
+    const prisma = fakePrisma([{ id: "run-1", updatedAt: new Date() }]);
+    const { jobs, enqueue } = publisher();
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 1, maxPagesPerPass: 2 });
+    await reconciler.reconcileOnce();
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    await reconciler.reconcileOnce();
+    expect(enqueue).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(prisma.run.findMany).mock.calls[2]?.[0]?.where?.AND).toHaveLength(2);
+  });
+
+  it("retries failed publications without advancing the page cursor", async () => {
+    const prisma = fakePrisma([{ id: "run-1", updatedAt: new Date() }]);
+    const { jobs, enqueue } = publisher();
+    enqueue.mockRejectedValueOnce(new Error("publisher unavailable"));
+    const reconciler = createJobReconciler({ prisma, jobs }, { batchSize: 1, maxPagesPerPass: 1 });
+    await expect(reconciler.reconcileOnce()).rejects.toThrow("publisher unavailable");
+    await reconciler.reconcileOnce();
+    expect(vi.mocked(prisma.run.findMany).mock.calls[1]?.[0]?.where?.AND).toHaveLength(1);
+    expect(enqueue.mock.calls[0]).toEqual(enqueue.mock.calls[1]);
+  });
+
+  it("shares overlapping passes and stops after in-flight publication before releasing leadership", async () => {
+    const prisma = fakePrisma([{ id: "run-1", updatedAt: new Date() }]);
+    let finish!: () => void;
+    const publication = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const { jobs, enqueue } = publisher();
+    enqueue.mockImplementation(() => publication);
+    const leadership = {
+      tryAcquire: vi.fn(async () => true),
+      release: vi.fn(async () => undefined),
+    };
+    const reconciler = createJobReconciler({ prisma, jobs, leadership }, { batchSize: 1 });
+    const first = reconciler.reconcileOnce();
+    const second = reconciler.reconcileOnce();
+    await vi.waitFor(() => expect(enqueue).toHaveBeenCalledOnce());
+    const stopping = reconciler.stop();
+    expect(leadership.release).not.toHaveBeenCalled();
+    finish();
+    await Promise.all([first, second, stopping]);
+    expect(prisma.run.findMany).toHaveBeenCalledOnce();
+    expect(leadership.release).toHaveBeenCalledOnce();
+  });
+
+  it("rechecks leadership between pages", async () => {
+    const prisma = fakePrisma([{ id: "run-1", updatedAt: new Date() }]);
+    const { jobs, enqueue } = publisher();
+    const leadership = {
+      tryAcquire: vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false),
+      release: vi.fn(),
+    };
+    const reconciler = createJobReconciler({ prisma, jobs, leadership }, { batchSize: 1 });
+    await reconciler.reconcileOnce();
+    expect(enqueue).toHaveBeenCalledOnce();
+    expect(leadership.tryAcquire).toHaveBeenCalledTimes(2);
   });
 
   it("does not scan when another replica is the reconciliation leader", async () => {

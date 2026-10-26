@@ -1,3 +1,4 @@
+import { setImmediate } from "node:timers/promises";
 import { type JobPublisher, routineWakeupJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import type { PoolClient } from "pg";
@@ -95,10 +96,16 @@ export function createJobReconciler(
     jobs: JobPublisher;
     leadership?: ReconciliationLeadership;
   },
-  options: { intervalMs?: number; batchSize?: number } = {},
+  options: { intervalMs?: number; batchSize?: number; maxPagesPerPass?: number } = {},
 ) {
   const intervalMs = options.intervalMs ?? DEFAULT_INTERVAL_MS;
   const batchSize = options.batchSize ?? DEFAULT_BATCH_SIZE;
+  const maxPagesPerPass = options.maxPagesPerPass ?? 10;
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new Error("Invalid batch size");
+  if (!Number.isSafeInteger(maxPagesPerPass) || maxPagesPerPass < 1) {
+    throw new Error("Invalid page budget");
+  }
+  let stopping = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   let reconciling: Promise<void> | undefined;
   let runCursor: Cursor | undefined;
@@ -109,139 +116,152 @@ export function createJobReconciler(
   const reconcileOnce = async () => {
     if (reconciling) return reconciling;
     reconciling = (async () => {
-      if (deps.leadership && !(await deps.leadership.tryAcquire())) return;
-
-      const now = new Date();
-      controlScanDeadline ??= new Date(now.getTime() + CONTROL_LOOKAHEAD_MS);
-      const runCursorFilter = runCursor
-        ? {
-            OR: [
-              { updatedAt: { gt: runCursor.at } },
-              { updatedAt: runCursor.at, id: { gt: runCursor.id } },
-            ],
-          }
-        : undefined;
-      const routineCursorFilter = routineCursor
-        ? {
-            OR: [
-              { nextRunAt: { gt: routineCursor.at } },
-              { nextRunAt: routineCursor.at, id: { gt: routineCursor.id } },
-            ],
-          }
-        : undefined;
-      const controlCursorFilter = controlCursor
-        ? controlCursor.at
+      for (let page = 0; page < maxPagesPerPass && !stopping; page += 1) {
+        if (deps.leadership && !(await deps.leadership.tryAcquire())) return;
+        const now = new Date();
+        controlScanDeadline ??= new Date(now.getTime() + CONTROL_LOOKAHEAD_MS);
+        const runCursorFilter = runCursor
           ? {
               OR: [
-                { controlLeaseExpiresAt: { gt: controlCursor.at } },
-                {
-                  controlLeaseExpiresAt: controlCursor.at,
-                  id: { gt: controlCursor.id },
-                },
-                { controlLeaseExpiresAt: null },
+                { updatedAt: { gt: runCursor.at } },
+                { updatedAt: runCursor.at, id: { gt: runCursor.id } },
               ],
             }
-          : { controlLeaseExpiresAt: null, id: { gt: controlCursor.id } }
-        : undefined;
-      const [runs, routines, controls] = await Promise.all([
-        deps.prisma.run.findMany({
-          where: {
-            AND: [
-              {
+          : undefined;
+        const routineCursorFilter = routineCursor
+          ? {
+              OR: [
+                { nextRunAt: { gt: routineCursor.at } },
+                { nextRunAt: routineCursor.at, id: { gt: routineCursor.id } },
+              ],
+            }
+          : undefined;
+        const controlCursorFilter = controlCursor
+          ? controlCursor.at
+            ? {
                 OR: [
-                  { status: "queued" },
+                  { controlLeaseExpiresAt: { gt: controlCursor.at } },
                   {
-                    status: { in: ["leased", "running"] },
-                    leaseExpiresAt: { lte: now },
+                    controlLeaseExpiresAt: controlCursor.at,
+                    id: { gt: controlCursor.id },
                   },
-                ],
-              },
-              ...(runCursorFilter ? [runCursorFilter] : []),
-            ],
-          },
-          orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-          take: batchSize,
-          select: { id: true, updatedAt: true },
-        }),
-        deps.prisma.routine.findMany({
-          where: {
-            AND: [
-              {
-                active: true,
-                nextRunAt: { lte: new Date(now.getTime() + ROUTINE_LOOKAHEAD_MS) },
-              },
-              ...(routineCursorFilter ? [routineCursorFilter] : []),
-            ],
-          },
-          orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
-          take: batchSize,
-          select: { id: true, nextRunAt: true },
-        }),
-        deps.prisma.computer.findMany({
-          where: {
-            AND: [
-              { controlLeaseId: { not: null } },
-              {
-                OR: [
                   { controlLeaseExpiresAt: null },
-                  {
-                    controlLeaseExpiresAt: {
-                      lte: controlScanDeadline,
-                    },
-                  },
                 ],
-              },
-              ...(controlCursorFilter ? [controlCursorFilter] : []),
-            ],
-          },
-          orderBy: [{ controlLeaseExpiresAt: "asc" }, { id: "asc" }],
-          take: batchSize,
-          select: {
-            id: true,
-            controlBotId: true,
-            controlLeaseId: true,
-            controlLeaseExpiresAt: true,
-          },
-        }),
-      ]);
+              }
+            : { controlLeaseExpiresAt: null, id: { gt: controlCursor.id } }
+          : undefined;
+        const [runs, routines, controls] = await Promise.all([
+          page > 0 && !runCursor
+            ? Promise.resolve([])
+            : deps.prisma.run.findMany({
+                where: {
+                  AND: [
+                    {
+                      OR: [
+                        { status: "queued" },
+                        {
+                          status: { in: ["leased", "running"] },
+                          leaseExpiresAt: { lte: now },
+                        },
+                      ],
+                    },
+                    ...(runCursorFilter ? [runCursorFilter] : []),
+                  ],
+                },
+                orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+                take: batchSize,
+                select: { id: true, updatedAt: true },
+              }),
+          page > 0 && !routineCursor
+            ? Promise.resolve([])
+            : deps.prisma.routine.findMany({
+                where: {
+                  AND: [
+                    {
+                      active: true,
+                      nextRunAt: { lte: new Date(now.getTime() + ROUTINE_LOOKAHEAD_MS) },
+                    },
+                    ...(routineCursorFilter ? [routineCursorFilter] : []),
+                  ],
+                },
+                orderBy: [{ nextRunAt: "asc" }, { id: "asc" }],
+                take: batchSize,
+                select: { id: true, nextRunAt: true },
+              }),
+          page > 0 && !controlCursor
+            ? Promise.resolve([])
+            : deps.prisma.computer.findMany({
+                where: {
+                  AND: [
+                    { controlLeaseId: { not: null } },
+                    {
+                      OR: [
+                        { controlLeaseExpiresAt: null },
+                        {
+                          controlLeaseExpiresAt: {
+                            lte: controlScanDeadline,
+                          },
+                        },
+                      ],
+                    },
+                    ...(controlCursorFilter ? [controlCursorFilter] : []),
+                  ],
+                },
+                orderBy: [{ controlLeaseExpiresAt: "asc" }, { id: "asc" }],
+                take: batchSize,
+                select: {
+                  id: true,
+                  controlBotId: true,
+                  controlLeaseId: true,
+                  controlLeaseExpiresAt: true,
+                },
+              }),
+        ]);
 
-      await Promise.all([
-        ...runs.map((run) => deps.jobs.enqueue(runContinueJob(run.id))),
-        ...routines.flatMap((routine) =>
-          routine.nextRunAt
-            ? [deps.jobs.enqueue(routineWakeupJob(routine.id, routine.nextRunAt))]
-            : [],
-        ),
-        ...controls.flatMap((computer) =>
-          computer.controlBotId
-            ? [
-                scheduleComputerControlExpiry(
-                  deps.jobs,
-                  computer.id,
-                  computer.controlLeaseId!,
-                  computer.controlLeaseExpiresAt ?? now,
-                ),
-              ]
-            : [],
-        ),
-      ]);
+        const published = await Promise.allSettled([
+          ...runs.map((run) => deps.jobs.enqueue(runContinueJob(run.id))),
+          ...routines.flatMap((routine) =>
+            routine.nextRunAt
+              ? [deps.jobs.enqueue(routineWakeupJob(routine.id, routine.nextRunAt))]
+              : [],
+          ),
+          ...controls.flatMap((computer) =>
+            computer.controlBotId
+              ? [
+                  scheduleComputerControlExpiry(
+                    deps.jobs,
+                    computer.id,
+                    computer.controlLeaseId!,
+                    computer.controlLeaseExpiresAt ?? now,
+                  ),
+                ]
+              : [],
+          ),
+        ]);
 
-      const lastRun = runs.at(-1);
-      runCursor =
-        runs.length === batchSize && lastRun
-          ? { at: lastRun.updatedAt, id: lastRun.id }
-          : undefined;
-      const lastRoutine = routines.at(-1);
-      routineCursor =
-        routines.length === batchSize && lastRoutine?.nextRunAt
-          ? { at: lastRoutine.nextRunAt, id: lastRoutine.id }
-          : undefined;
-      const lastControl = controls.at(-1);
-      controlCursor =
-        controls.length === batchSize && lastControl
-          ? { at: lastControl.controlLeaseExpiresAt, id: lastControl.id }
-          : undefined;
-      if (!controlCursor) controlScanDeadline = undefined;
+        // Wait for every publication before retrying a failed page or releasing leadership.
+        const failed = published.find((result) => result.status === "rejected");
+        if (failed?.status === "rejected") throw failed.reason;
+
+        const lastRun = runs.at(-1);
+        runCursor =
+          runs.length === batchSize && lastRun
+            ? { at: lastRun.updatedAt, id: lastRun.id }
+            : undefined;
+        const lastRoutine = routines.at(-1);
+        routineCursor =
+          routines.length === batchSize && lastRoutine?.nextRunAt
+            ? { at: lastRoutine.nextRunAt, id: lastRoutine.id }
+            : undefined;
+        const lastControl = controls.at(-1);
+        controlCursor =
+          controls.length === batchSize && lastControl
+            ? { at: lastControl.controlLeaseExpiresAt, id: lastControl.id }
+            : undefined;
+        if (!controlCursor) controlScanDeadline = undefined;
+        if (!runCursor && !routineCursor && !controlCursor) break;
+        if (page + 1 < maxPagesPerPass && !stopping) await setImmediate();
+      }
     })().finally(() => {
       reconciling = undefined;
     });
@@ -255,11 +275,13 @@ export function createJobReconciler(
     reconcileOnce,
     start() {
       if (timer) return;
+      stopping = false;
       reconcileSafely();
       timer = setInterval(reconcileSafely, intervalMs);
       timer.unref?.();
     },
     async stop() {
+      stopping = true;
       if (timer) clearInterval(timer);
       timer = undefined;
       await reconciling?.catch(() => undefined);
