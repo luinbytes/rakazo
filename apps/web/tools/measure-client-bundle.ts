@@ -14,7 +14,8 @@ await build({
   plugins: [
     {
       name: "measure-client-bundle",
-      async generateBundle(_options, bundle) {
+      // Vite rewrites import/asset references late in generateBundle. Measure after emission.
+      async writeBundle(_options, bundle) {
         const chunks = Object.values(bundle).filter((item) => item.type === "chunk");
         const entries = chunks
           .filter((chunk) => chunk.isEntry)
