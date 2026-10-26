@@ -9,23 +9,42 @@ export class IsolationError extends Error {
 }
 
 export async function requireMembership(prisma: PrismaClient, userId: string): Promise<Actor> {
+  return (await resolveMembership(prisma, userId)).actor;
+}
+
+/** One authentication snapshot, owned by a single request; never cache across requests. */
+export async function resolveMembership(prisma: PrismaClient, userId: string) {
   const member = await prisma.member.findFirst({
     where: { userId },
-    include: { user: true, organization: true },
+    select: {
+      userId: true,
+      organizationId: true,
+      user: { select: { email: true, name: true, avatarStyle: true } },
+    },
   });
   if (!member) {
     throw new IsolationError("No personal workspace");
   }
   const settings = await prisma.deploymentSettings.findUnique({
     where: { id: "default" },
+    select: {
+      ownerUserId: true,
+      deploymentModelCredentialCipher: true,
+      defaultModelProvider: true,
+      defaultModelId: true,
+      computerHost: true,
+    },
   });
-  return {
+  const actor: Actor = {
     userId: member.userId,
     workspaceId: member.organizationId,
     email: member.user.email,
     isDeploymentOwner: settings?.ownerUserId === member.userId,
   };
+  return { actor, user: member.user, settings };
 }
+
+export type MembershipContext = Awaited<ReturnType<typeof resolveMembership>>;
 
 export function scoped<T extends { workspaceId: string; userId?: string }>(
   actor: Actor,

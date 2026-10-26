@@ -86,6 +86,7 @@ async function main() {
           "pnpm exec vitest run --no-file-parallelism",
           "packages/testkit/src/journeys.test.ts",
           "packages/testkit/src/authorization.test.ts",
+          "apps/api/src/request-membership.postgres.test.ts",
           "packages/testkit/src/attachments.test.ts",
           "packages/testkit/src/voice.test.ts",
           "packages/testkit/src/search.test.ts",

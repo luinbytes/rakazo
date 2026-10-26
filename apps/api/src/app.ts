@@ -42,7 +42,13 @@ import {
 } from "@rakazo/adapters";
 import { blockedAuthPaths, createAuth } from "@rakazo/auth";
 import { signupPolicyFromEnv } from "@rakazo/core";
-import { createDb, createThreadEvents, type PrismaClient, requireMembership } from "@rakazo/db";
+import {
+  createDb,
+  createThreadEvents,
+  type PrismaClient,
+  requireMembership,
+  resolveMembership,
+} from "@rakazo/db";
 import { MarkdownMemoryStore } from "@rakazo/memory";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -303,12 +309,16 @@ export async function createApp(
   });
   app.use("/rpc/*", async (c, next) => {
     const session = await auth.api.getSession({ headers: sessionHeaders(c.req.raw) });
-    const actor = session?.user
-      ? await requireMembership(prisma, session.user.id).catch(() => null)
+    const membership = session?.user
+      ? await resolveMembership(prisma, session.user.id).catch(() => null)
       : null;
     const { matched, response } = await rpc.handle(c.req.raw, {
       prefix: "/rpc",
-      context: { actor, signal: c.req.raw.signal },
+      context: {
+        actor: membership?.actor ?? null,
+        membership: membership ?? undefined,
+        signal: c.req.raw.signal,
+      },
     });
     if (matched) return c.newResponse(response.body, response);
     await next();

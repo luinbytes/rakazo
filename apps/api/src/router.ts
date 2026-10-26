@@ -94,6 +94,7 @@ import {
   findWorkspaceMemoryConfig,
   IsolationError,
   lockOwnedGroup,
+  type MembershipContext,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
   Prisma,
@@ -325,7 +326,11 @@ export interface RouterDeps {
 }
 
 export function createRouter(deps: RouterDeps) {
-  const os = implement(appContract).$context<{ actor: Actor | null; signal?: AbortSignal }>();
+  const os = implement(appContract).$context<{
+    actor: Actor | null;
+    membership?: MembershipContext;
+    signal?: AbortSignal;
+  }>();
   const repos = createRepos(deps.prisma);
   const mcpOAuth = deps.mcpOAuth ?? new McpOAuthBroker(deps.prisma, deps.secrets);
   const groupRepos = createGroupRepos(deps.prisma);
@@ -346,7 +351,9 @@ export function createRouter(deps: RouterDeps) {
 
   return os.router({
     health: os.health.handler(async () => ({ ok: true as const, version: "0.1.0" })),
-    me: authed.me.handler(async ({ context }): Promise<Me> => meDto(deps, context.actor)),
+    me: authed.me.handler(
+      async ({ context }): Promise<Me> => meDto(deps, context.actor, context.membership),
+    ),
     preferences: {
       update: authed.preferences.update.handler(async ({ context, input }): Promise<Me> => {
         await deps.prisma.user.update({
@@ -359,7 +366,7 @@ export function createRouter(deps: RouterDeps) {
     bootstrap: authed.bootstrap.handler(async ({ context, input }) => {
       const actor = context.actor;
       const [me, bots, botSections, archivedBots, archivedGroups] = await Promise.all([
-        meDto(deps, actor),
+        meDto(deps, actor, context.membership),
         repos.listBots(actor),
         repos.listBotSections(actor),
         repos.listBots(actor, { archived: true }),
@@ -3163,11 +3170,26 @@ async function loadAutoReviewSettings(deps: RouterDeps, actor: Actor) {
   return { enabled, checkerAvailable };
 }
 
-async function meDto(deps: RouterDeps, actor: Actor): Promise<Me> {
+async function meDto(deps: RouterDeps, actor: Actor, membership?: MembershipContext): Promise<Me> {
   const [user, cred, settings] = await Promise.all([
-    deps.prisma.user.findUniqueOrThrow({ where: { id: actor.userId } }),
+    membership
+      ? membership.user
+      : deps.prisma.user.findUniqueOrThrow({
+          where: { id: actor.userId },
+          select: { email: true, name: true, avatarStyle: true },
+        }),
     findDefaultModelCredential(deps.prisma, actor),
-    deps.prisma.deploymentSettings.findUnique({ where: { id: "default" } }),
+    membership
+      ? membership.settings
+      : deps.prisma.deploymentSettings.findUnique({
+          where: { id: "default" },
+          select: {
+            deploymentModelCredentialCipher: true,
+            defaultModelProvider: true,
+            defaultModelId: true,
+            computerHost: true,
+          },
+        }),
   ]);
   const hasDeployment = Boolean(
     settings?.deploymentModelCredentialCipher || deps.env.deploymentModelKey,
