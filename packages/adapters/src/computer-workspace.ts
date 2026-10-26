@@ -1,17 +1,17 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type {
   AdapterContext,
   AgentHomeStore,
   ComputerRef,
-  PortableFile,
   SandboxProvider,
 } from "@rakazo/adapter-kit";
 import type { ComputerMode } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { normalizeWorkspacePath, teamBotWorkspaceDirectory } from "./computer-support.js";
+import { teamBotWorkspaceDirectory } from "./computer-support.js";
 import { LocalAgentHomeStore } from "./home.js";
+import { writePortableFile } from "./portable-workspace-file.js";
 
 export const PORTABLE_BROWSER_STOP_COMMAND =
   "pkill -f '[g]oogle-chrome|[c]hromium|[f]irefox' || true";
@@ -92,6 +92,9 @@ export async function checkpointComputerWorkspace(
   if (computer.kind === "docker" && home instanceof LocalAgentHomeStore) {
     return home.revise(homeKey);
   }
+  if (home instanceof LocalAgentHomeStore) {
+    return home.commitPortableFiles(homeKey, sandbox.exportWorkspace(computer, context), context);
+  }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
   try {
     for await (const file of sandbox.exportWorkspace(computer, context)) {
@@ -121,16 +124,4 @@ export async function checkpointAndRecordComputerWorkspace(
     data: { homeRevision: revision },
   });
   return revision;
-}
-
-async function writePortableFile(root: string, file: PortableFile) {
-  const relative = normalizeWorkspacePath(file.path);
-  if (!relative) throw new Error("Workspace snapshots cannot contain an empty file path");
-  const target = path.resolve(root, relative);
-  const resolvedRoot = path.resolve(root);
-  if (target !== resolvedRoot && !target.startsWith(`${resolvedRoot}${path.sep}`)) {
-    throw new Error("Workspace snapshot path escapes its staging directory");
-  }
-  await mkdir(path.dirname(target), { recursive: true });
-  await writeFile(target, file.content, { mode: file.executable ? 0o700 : 0o600 });
 }

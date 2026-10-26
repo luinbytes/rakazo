@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import type { AdapterContext, AgentHomeStore, PortableFile } from "@rakazo/adapter-kit";
+import { writePortableFile } from "./portable-workspace-file.js";
 
 export class LocalAgentHomeStore implements AgentHomeStore {
   private readonly botWrites = new Map<string, Promise<void>>();
@@ -51,6 +52,23 @@ export class LocalAgentHomeStore implements AgentHomeStore {
   }
 
   async commit(botId: string, src: string, _context: AdapterContext): Promise<string> {
+    return this.commitStaging(botId, (staging) => copyDir(src, staging));
+  }
+
+  async commitPortableFiles(
+    botId: string,
+    files: AsyncIterable<PortableFile>,
+    _context: AdapterContext,
+  ): Promise<string> {
+    return this.commitStaging(botId, async (staging) => {
+      for await (const file of files) await writePortableFile(staging, file);
+    });
+  }
+
+  private async commitStaging(
+    botId: string,
+    populate: (staging: string) => Promise<void>,
+  ): Promise<string> {
     return this.withBotWrite(botId, async () => {
       await this.recoverInterruptedCommit(botId);
       const dest = this.botDir(botId);
@@ -60,7 +78,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
       await mkdir(parent, { recursive: true });
       await mkdir(staging, { recursive: true });
       try {
-        await copyDir(src, staging);
+        await populate(staging);
         await rm(previous, { recursive: true, force: true });
         if (await pathExists(dest)) await rename(dest, previous);
         try {
