@@ -89,6 +89,7 @@ async function main() {
           "packages/testkit/src/attachments.test.ts",
           "packages/testkit/src/voice.test.ts",
           "packages/testkit/src/search.test.ts",
+          "apps/api/src/search.postgres.test.ts",
           "packages/testkit/src/executor-lifecycle.test.ts",
           "packages/testkit/src/connections.test.ts",
           "packages/adapters/src/wakeup.postgres.test.ts",

@@ -1,6 +1,6 @@
 import type { Actor, MessageBlock, SearchHit } from "@rakazo/contracts";
 import { extractLinksFromText, matchesSearchQuery, snippetAroundMatch } from "@rakazo/core";
-import type { Prisma, PrismaClient } from "@rakazo/db";
+import { Prisma, type PrismaClient } from "@rakazo/db";
 
 const SEARCH_LIMIT = 25;
 /** Cap name matches so content hits (messages/files/links/routines) keep most of the budget. */
@@ -96,20 +96,18 @@ export async function queryWorkspaceSearch(
     include: { bot: { select: { name: true } } },
     take: SEARCH_LIMIT,
   });
+  const artifactsMessages = await findArtifactMessages(
+    prisma,
+    actor,
+    artifacts.flatMap((artifact) =>
+      artifact.botId && artifact.bot ? [{ id: artifact.id, destinationId: artifact.botId }] : [],
+    ),
+    "botId",
+  );
   for (const artifact of artifacts) {
+    if (contentHits.length >= contentBudget) break;
     if (!artifact.botId || !artifact.bot) continue;
-    const messageRows = await prisma.$queryRaw<Array<{ id: string; seq: number }>>`
-      SELECT m.id, m.seq
-      FROM messages m
-      INNER JOIN threads t ON t.id = m."threadId"
-      WHERE t."workspaceId" = ${actor.workspaceId}
-        AND t."userId" = ${actor.userId}
-        AND t."botId" = ${artifact.botId}
-        AND m.blocks::text ILIKE ${`%${artifact.id}%`}
-      ORDER BY m."createdAt" DESC
-      LIMIT 1
-    `;
-    const message = messageRows[0];
+    const message = artifactsMessages.get(artifact.id);
     if (!message) continue;
     pushInto(
       contentHits,
@@ -127,6 +125,8 @@ export async function queryWorkspaceSearch(
     );
   }
 
+  if (contentHits.length >= contentBudget) return [...conversationHits, ...contentHits];
+
   const groupArtifacts = await prisma.artifact.findMany({
     where: {
       workspaceId: actor.workspaceId,
@@ -137,20 +137,20 @@ export async function queryWorkspaceSearch(
     include: { group: { select: { name: true } } },
     take: SEARCH_LIMIT,
   });
+  const groupArtifactsMessages = await findArtifactMessages(
+    prisma,
+    actor,
+    groupArtifacts.flatMap((artifact) =>
+      artifact.groupId && artifact.group
+        ? [{ id: artifact.id, destinationId: artifact.groupId }]
+        : [],
+    ),
+    "groupId",
+  );
   for (const artifact of groupArtifacts) {
+    if (contentHits.length >= contentBudget) break;
     if (!artifact.groupId || !artifact.group) continue;
-    const messageRows = await prisma.$queryRaw<Array<{ id: string; seq: number }>>`
-      SELECT m.id, m.seq
-      FROM messages m
-      INNER JOIN threads t ON t.id = m."threadId"
-      WHERE t."workspaceId" = ${actor.workspaceId}
-        AND t."userId" = ${actor.userId}
-        AND t."groupId" = ${artifact.groupId}
-        AND m.blocks::text ILIKE ${`%${artifact.id}%`}
-      ORDER BY m."createdAt" DESC
-      LIMIT 1
-    `;
-    const message = messageRows[0];
+    const message = groupArtifactsMessages.get(artifact.id);
     if (!message) continue;
     pushInto(
       contentHits,
@@ -167,6 +167,8 @@ export async function queryWorkspaceSearch(
       contentBudget,
     );
   }
+
+  if (contentHits.length >= contentBudget) return [...conversationHits, ...contentHits];
 
   const routines = await prisma.routine.findMany({
     where: {
@@ -195,6 +197,8 @@ export async function queryWorkspaceSearch(
       contentBudget,
     );
   }
+
+  if (contentHits.length >= contentBudget) return [...conversationHits, ...contentHits];
 
   const pattern = `%${query}%`;
   const messageRows = await prisma.$queryRaw<
@@ -230,6 +234,8 @@ export async function queryWorkspaceSearch(
     });
   }
 
+  if (contentHits.length >= contentBudget) return [...conversationHits, ...contentHits];
+
   const groupMessageRows = await prisma.$queryRaw<
     Array<{
       id: string;
@@ -264,6 +270,36 @@ export async function queryWorkspaceSearch(
   }
 
   return [...conversationHits, ...contentHits].slice(0, SEARCH_LIMIT);
+}
+
+/** One round trip for each bounded candidate batch; keep the original ILIKE/createdAt semantics. */
+async function findArtifactMessages(
+  prisma: PrismaClient,
+  actor: Actor,
+  artifacts: Array<{ id: string; destinationId: string }>,
+  destination: "botId" | "groupId",
+): Promise<Map<string, { id: string; seq: number }>> {
+  if (!artifacts.length) return new Map();
+  const destinationColumn =
+    destination === "botId" ? Prisma.sql`t."botId"` : Prisma.sql`t."groupId"`;
+  const rows = await prisma.$queryRaw<Array<{ artifactId: string; id: string; seq: number }>>(
+    Prisma.sql`
+      SELECT a.id AS "artifactId", latest.id, latest.seq
+      FROM (VALUES ${Prisma.join(artifacts.map((artifact) => Prisma.sql`(${artifact.id}::text, ${artifact.destinationId}::text)`))}) AS a(id, "destinationId")
+      CROSS JOIN LATERAL (
+        SELECT m.id, m.seq
+        FROM messages m
+        INNER JOIN threads t ON t.id = m."threadId"
+        WHERE t."workspaceId" = ${actor.workspaceId}
+          AND t."userId" = ${actor.userId}
+          AND ${destinationColumn} = a."destinationId"
+          AND m.blocks::text ILIKE ('%' || a.id || '%')
+        ORDER BY m."createdAt" DESC
+        LIMIT 1
+      ) latest
+    `,
+  );
+  return new Map(rows.map((row) => [row.artifactId, { id: row.id, seq: row.seq }]));
 }
 
 function pushMessageHits(
