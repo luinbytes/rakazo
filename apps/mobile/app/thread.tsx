@@ -11,6 +11,7 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   type ComposerMention,
+  createRefreshCoalescer,
   isApprovalAskBlock,
   isRunTerminalEvent,
   isSecretAskBlock,
@@ -472,6 +473,9 @@ export default function Thread() {
     }
     expandedHistoryThread.current = null;
     historyEpoch.current += 1;
+    const snapshotRefresh = createRefreshCoalescer(async () => {
+      if (!jumpScrollTarget.current && !expandedHistoryThread.current) await refresh();
+    });
     const abort = new AbortController();
     void (async () => {
       // Pending search jumps load the around-page separately; avoid replacing it with latest.
@@ -520,7 +524,7 @@ export default function Thread() {
               }
               if (isRunTerminalEvent(event)) {
                 if (!jumpScrollTarget.current && !expandedHistoryThread.current) {
-                  void refresh().catch(() => undefined);
+                  void snapshotRefresh.invalidate().catch(() => undefined);
                 }
               }
             },
@@ -538,6 +542,7 @@ export default function Thread() {
       }
     })();
     return () => {
+      snapshotRefresh.dispose();
       abort.abort();
     };
   }, [botId, groupId, markReadIfVisible]);

@@ -40,6 +40,7 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   type ComposerMention,
+  createRefreshCoalescer,
   cronFromPreset,
   groupBotsForSidebar,
   inferAttachmentMimeType,
@@ -886,6 +887,8 @@ export function ShellPage() {
     }
     expandedHistoryThread.current = null;
     historyEpoch.current += 1;
+    const sidebarRefresh = createRefreshCoalescer(() => refreshBots());
+    const snapshotRefresh = createRefreshCoalescer(() => refreshThread(active.id));
     const abort = new AbortController();
     void (async () => {
       const primed = bootstrappedThread.current;
@@ -925,12 +928,12 @@ export function ShellPage() {
               isRunTerminalEvent(event) ||
               event.type === "thread.cleared"
             ) {
-              void refreshBots().catch(() => undefined);
+              void sidebarRefresh.invalidate().catch(() => undefined);
             }
             if (event.type === "thread.message.created") {
               const blocks = (event.payload.blocks as Array<{ kind?: string }>) ?? [];
               if (blocks.some((block) => block.kind === "child_bot")) {
-                void refreshBots().catch(() => undefined);
+                void sidebarRefresh.invalidate().catch(() => undefined);
               }
               if (event.payload.role === "bot") markBotReadIfVisible(active.id);
             }
@@ -940,7 +943,7 @@ export function ShellPage() {
               event.type === "skill.teaching.stopped"
             ) {
               // waiting_input: reconcile ask cards if a stale post-send refresh raced SSE.
-              void refreshThread(active.id).catch(() => undefined);
+              void snapshotRefresh.invalidate().catch(() => undefined);
             } else if (isComputerStatusEvent(event)) {
               void refreshComputerScreen(active.id).catch(() => undefined);
             }
@@ -955,6 +958,8 @@ export function ShellPage() {
       }
     })();
     return () => {
+      sidebarRefresh.dispose();
+      snapshotRefresh.dispose();
       abort.abort();
     };
   }, [active?.id, markBotReadIfVisible]);
@@ -995,6 +1000,8 @@ export function ShellPage() {
       expandedHistoryThread.current = null;
     }
     historyEpoch.current += 1;
+    const sidebarRefresh = createRefreshCoalescer(() => refreshBots());
+    const snapshotRefresh = createRefreshCoalescer(() => refreshGroupThread(groupId));
     const abort = new AbortController();
     void (async () => {
       const snap = pendingJump
@@ -1016,11 +1023,11 @@ export function ShellPage() {
               markVisibleGroupRead();
             }
             if (event.type === "run.started" || isRunTerminalEvent(event)) {
-              void refreshBots().catch(() => undefined);
+              void sidebarRefresh.invalidate().catch(() => undefined);
             }
             if (isRunTerminalEvent(event) || event.type === "run.waiting_input") {
               // waiting_input: reconcile ask cards if a stale post-send refresh raced SSE.
-              void refreshGroupThread(groupId).catch(() => undefined);
+              void snapshotRefresh.invalidate().catch(() => undefined);
             }
           }
         } catch {
@@ -1035,6 +1042,8 @@ export function ShellPage() {
     return () => {
       window.removeEventListener("focus", markVisibleGroupRead);
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
+      sidebarRefresh.dispose();
+      snapshotRefresh.dispose();
       abort.abort();
     };
   }, [activeGroup?.id, groupId]);
