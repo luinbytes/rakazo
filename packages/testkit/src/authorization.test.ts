@@ -116,6 +116,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["memory/update", { documentId: "missing-memory", content: "Nope" }],
       ["memory/exportMarkdown", {}],
       ["routines/list", { botId: "missing-bot" }],
+      ["routines/listForMentions"],
       ["routines/create", routineInput("missing-bot")],
       ["routines/update", { routineId: "missing-routine", name: "Nope" }],
       ["routines/remove", { routineId: "missing-routine" }],
@@ -496,6 +497,65 @@ describeWithDatabase("API authorization and resource isolation", () => {
     expect(
       await handles.prisma.actionApprovalRule.findUnique({ where: { id: ownerRule.id } }),
     ).not.toBeNull();
+  });
+
+  it("limits routine mentions to active bots owned by the actor in the current workspace", async () => {
+    const owner = await signup(app, `mention-owner-${stamp}@rakazo.test`, "Mention Owner");
+    const member = await signup(app, `mention-member-${stamp}@rakazo.test`, "Mention Member");
+    const outsider = await signup(app, `mention-outsider-${stamp}@rakazo.test`, "Mention Outsider");
+    const ownerActor = await rpc<Actor>(app, owner, "me");
+    const memberActor = await rpc<Actor>(app, member, "me");
+    await handles.prisma.member.deleteMany({ where: { userId: memberActor.userId } });
+    await handles.prisma.member.create({
+      data: {
+        id: `mention-member-${stamp}`,
+        organizationId: ownerActor.workspaceId,
+        userId: memberActor.userId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    const ownedBot = await rpc<Bot>(app, owner, "bots/create", botInput("Mention Owned"));
+    const archivedBot = await rpc<Bot>(app, owner, "bots/create", botInput("Mention Archived"));
+    const memberBot = await rpc<Bot>(app, member, "bots/create", botInput("Mention Member"));
+    const outsiderBot = await rpc<Bot>(app, outsider, "bots/create", botInput("Mention Outside"));
+    const owned = await rpc<{ id: string }>(
+      app,
+      owner,
+      "routines/create",
+      routineInput(ownedBot.id),
+    );
+    const archived = await rpc<{ id: string }>(
+      app,
+      owner,
+      "routines/create",
+      routineInput(archivedBot.id),
+    );
+    const memberRoutine = await rpc<{ id: string }>(
+      app,
+      member,
+      "routines/create",
+      routineInput(memberBot.id),
+    );
+    const outside = await rpc<{ id: string }>(
+      app,
+      outsider,
+      "routines/create",
+      routineInput(outsiderBot.id),
+    );
+    await rpc(app, owner, "bots/archive", { botId: archivedBot.id });
+    const rows = await rpc<Array<{ id: string; botId: string }>>(
+      app,
+      owner,
+      "routines/listForMentions",
+    );
+    expect(rows.map((row) => row.id)).toEqual([owned.id]);
+    expect(rows.map((row) => row.id)).not.toContain(archived.id);
+    expect(rows.map((row) => row.id)).not.toContain(memberRoutine.id);
+    expect(rows.map((row) => row.id)).not.toContain(outside.id);
+    expect(await rpc<Array<{ id: string }>>(app, member, "routines/listForMentions")).toEqual([
+      expect.objectContaining({ id: memberRoutine.id }),
+    ]);
   });
 
   it("isolates model defaults by workspace and switches them atomically", async () => {

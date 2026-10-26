@@ -327,6 +327,7 @@ export const appContract = {
     disconnectProvider: oc.output(z.object({ ok: z.literal(true) })),
   },
   routines: {
+    listForMentions: oc.output(z.array(RoutineSchema)),
     list: oc.input(botId).output(z.array(RoutineSchema)),
     create: oc.input(CreateRoutineInput).output(RoutineSchema),
     update: oc

@@ -15,6 +15,7 @@ import {
   isRunTerminalEvent,
   isSecretAskBlock,
   latestAnswerableAskMessageId,
+  loadRoutineMentions,
   mentionChipKey,
   resolveComposerSendPlan,
   SLASH_ACTIONS,
@@ -207,20 +208,23 @@ export default function Thread() {
     }
     let cancelled = false;
     const botNameById = new Map(mentionBots.map((bot) => [bot.id, bot.name]));
-    void Promise.all(
-      mentionBots.map((bot) =>
-        rpc<Routine[]>("routines/list", { botId: bot.id })
-          .then((rows) =>
+    void loadRoutineMentions(
+      mentionBots.map((bot) => bot.id),
+      () => rpc<Routine[]>("routines/listForMentions"),
+      (botId) => rpc<Routine[]>("routines/list", { botId }),
+    )
+      .then((rows) => {
+        if (!cancelled)
+          setMentionRoutines(
             rows.map((routine) => ({
               ...routine,
-              botName: botNameById.get(bot.id) ?? bot.name,
+              botName: botNameById.get(routine.botId),
             })),
-          )
-          .catch(() => [] as Array<Routine & { botName?: string }>),
-      ),
-    ).then((lists) => {
-      if (!cancelled) setMentionRoutines(lists.flat());
-    });
+          );
+      })
+      .catch(() => {
+        if (!cancelled) setMentionRoutines([]);
+      });
     void Promise.all([
       rpc<Connection[]>("connections/list").catch(() => [] as Connection[]),
       rpc<ConnectionCatalogItem[]>("connections/catalog", {}).catch(

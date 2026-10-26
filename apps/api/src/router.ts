@@ -1722,6 +1722,23 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     routines: {
+      listForMentions: authed.routines.listForMentions.handler(async ({ context }) => {
+        // Match getBot ownership/archive isolation without fetching thread/computer rows per bot.
+        const bots = await deps.prisma.bot.findMany({
+          where: {
+            workspaceId: context.actor.workspaceId,
+            userId: context.actor.userId,
+            archivedAt: null,
+          },
+          select: { id: true },
+        });
+        // Keep the existing per-bot read and its database order; Promise.all retains
+        // per-bot order and a single failed bot still leaves other suggestions available.
+        const lists = await Promise.all(
+          bots.map((bot) => listRoutinesDto(deps, context.actor, bot.id).catch(() => [])),
+        );
+        return lists.flat();
+      }),
       list: authed.routines.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
         return listRoutinesDto(deps, context.actor, input.botId);
