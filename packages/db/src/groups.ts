@@ -446,13 +446,15 @@ export async function lockOwnedGroup(
   actor: Pick<Actor, "workspaceId" | "userId">,
   groupId: string,
 ) {
+  // Serialize group mutations without blocking the KEY SHARE foreign-key checks
+  // performed by concurrent thread writes (group -> thread versus thread -> group).
   const locked = await prisma.$queryRaw<Array<{ id: string }>>`
     SELECT id
     FROM chat_groups
     WHERE id = ${groupId}
       AND "workspaceId" = ${actor.workspaceId}
       AND "userId" = ${actor.userId}
-    FOR UPDATE
+    FOR NO KEY UPDATE
   `;
   if (locked.length !== 1) throw new IsolationError();
 }
