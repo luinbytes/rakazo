@@ -1,11 +1,10 @@
-import type { ComputerStatus } from "@rakazo/contracts";
+import type { ComputerMode, ComputerStatus } from "@rakazo/contracts";
 import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
-  type ComputerMode,
   normalizeCreateBotProfile,
-} from "@rakazo/contracts";
+} from "@rakazo/contracts/client";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, TextInput } from "react-native";

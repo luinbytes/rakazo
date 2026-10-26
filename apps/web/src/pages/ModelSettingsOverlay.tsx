@@ -4,7 +4,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   openAiCompatibleConnectReady,
   openAiCompatibleProbeSuccessMessage,
-} from "@rakazo/contracts";
+} from "@rakazo/contracts/client";
 import { Button } from "@rakazo/ui-web";
 import { ChevronDown } from "lucide-react";
 import {

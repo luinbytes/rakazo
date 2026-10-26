@@ -1,7 +1,27 @@
 import * as z from "zod";
+import {
+  BOT_DESCRIPTION_MAX_LENGTH,
+  BOT_INSTRUCTIONS_MAX_LENGTH,
+  BOT_NAME_MAX_LENGTH,
+  BOT_TITLE_MAX_LENGTH,
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+} from "./client.js";
 import { ThreadMessageSchema } from "./events.js";
 import { Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
+
+export {
+  BOT_DESCRIPTION_MAX_LENGTH,
+  BOT_INSTRUCTIONS_MAX_LENGTH,
+  BOT_NAME_MAX_LENGTH,
+  BOT_TITLE_MAX_LENGTH,
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
+  normalizeCreateBotProfile,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+} from "./client.js";
 
 export const ComputerModeSchema = z.enum(["team", "dedicated"]);
 export type ComputerMode = z.infer<typeof ComputerModeSchema>;
@@ -61,9 +81,6 @@ export const GroupMemberSchema = z.object({
 });
 export type GroupMember = z.infer<typeof GroupMemberSchema>;
 
-export const GROUP_MEMBER_MIN = 2;
-export const GROUP_MEMBER_MAX = 6;
-
 export const GroupSchema = z.object({
   id: Id,
   workspaceId: Id,
@@ -115,11 +132,6 @@ export const BotSectionSchema = z.object({
 });
 export type BotSection = z.infer<typeof BotSectionSchema>;
 
-export const BOT_NAME_MAX_LENGTH = 80;
-export const BOT_TITLE_MAX_LENGTH = 500;
-export const BOT_DESCRIPTION_MAX_LENGTH = 4000;
-export const BOT_INSTRUCTIONS_MAX_LENGTH = 20000;
-
 export const CreateBotInput = z.object({
   name: z.string().trim().min(1).max(BOT_NAME_MAX_LENGTH),
   title: z.string().max(BOT_TITLE_MAX_LENGTH).default(""),
@@ -130,18 +142,6 @@ export const CreateBotInput = z.object({
   computerMode: ComputerModeSchema.default("team"),
 });
 export type CreateBotInput = z.infer<typeof CreateBotInput>;
-
-export function normalizeCreateBotProfile(
-  input: Pick<CreateBotInput, "name" | "title" | "description">,
-) {
-  const description = input.description.trim();
-  return {
-    name: input.name.trim().slice(0, BOT_NAME_MAX_LENGTH),
-    title: input.title.trim().slice(0, BOT_TITLE_MAX_LENGTH),
-    description: description.slice(0, BOT_DESCRIPTION_MAX_LENGTH),
-    instructions: description.slice(0, BOT_INSTRUCTIONS_MAX_LENGTH),
-  };
-}
 
 export const UpdateBotInput = z
   .object({
@@ -604,8 +604,6 @@ export const ModelCredentialSchema = z.object({
   modelId: z.string().optional(),
 });
 export type ModelCredential = z.infer<typeof ModelCredentialSchema>;
-
-export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
 
 export const ModelConnectInputSchema = z
   .object({

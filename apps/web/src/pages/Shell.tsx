@@ -34,7 +34,7 @@ import {
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
   normalizeCreateBotProfile,
-} from "@rakazo/contracts";
+} from "@rakazo/contracts/client";
 import {
   abortableDelay,
   attachmentsForThread,

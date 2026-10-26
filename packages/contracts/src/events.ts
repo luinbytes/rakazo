@@ -1,6 +1,9 @@
 import * as z from "zod";
+import { MAX_CHART_DATA_ROWS } from "./client.js";
 import { Id } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
+
+export { MAX_CHART_DATA_ROWS } from "./client.js";
 
 export const ProductEventType = z.enum([
   "thread.message.created",
@@ -45,8 +48,6 @@ export const ProductEventType = z.enum([
 export type ProductEventType = z.infer<typeof ProductEventType>;
 
 export const MessageRole = z.enum(["user", "bot", "system"]);
-
-export const MAX_CHART_DATA_ROWS = 5_000;
 
 const ChartSpec = z.record(z.string(), z.any());
 
