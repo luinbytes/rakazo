@@ -94,6 +94,7 @@ async function main() {
           "packages/adapters/src/wakeup.postgres.test.ts",
           "packages/adapters/src/realtime.postgres.test.ts",
           "packages/adapters/src/job-reconciler.postgres.test.ts",
+          "packages/db/src/sidebar.postgres.test.ts",
         ].join(" "),
         {
           stdio: "inherit",

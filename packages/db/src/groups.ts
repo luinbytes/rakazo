@@ -7,6 +7,7 @@ import {
 } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
+import { latestMessageBlocks } from "./latest-message-blocks.js";
 import { IsolationError } from "./scope.js";
 
 const activeRunStatuses = [...ACTIVE_RUN_STATUSES];
@@ -163,12 +164,24 @@ export function createGroupRepos(prisma: PrismaClient) {
           userId: actor.userId,
           archivedAt: options.archived ? { not: null } : null,
         },
-        include: groupInclude,
+        include: { ...groupInclude, thread: { select: { id: true, unread: true } } },
         orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       });
+      const latest = await latestMessageBlocks(
+        prisma,
+        actor,
+        groups.flatMap((group) => (group.thread ? [group.thread.id] : [])),
+      );
       return groups
         .filter((group) => hasMinimumActiveMembers(group.members))
-        .map((group) => mapGroup(group as GroupRecord));
+        .map((group) =>
+          mapGroup({
+            ...group,
+            thread: group.thread
+              ? { ...group.thread, messages: [{ blocks: latest.get(group.thread.id) ?? [] }] }
+              : null,
+          }),
+        );
     },
 
     async getGroup(actor: Actor, groupId: string, options: { includeArchived?: boolean } = {}) {

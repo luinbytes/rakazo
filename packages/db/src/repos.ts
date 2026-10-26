@@ -7,6 +7,7 @@ import {
 } from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { type ComputerMode, ensureComputerRecord, parseComputerMode } from "./computers.js";
+import { latestMessageBlocks } from "./latest-message-blocks.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import { IsolationError } from "./scope.js";
 
@@ -163,11 +164,7 @@ export function createRepos(prisma: PrismaClient) {
           archivedAt: options.archived ? { not: null } : null,
         },
         include: {
-          thread: {
-            include: {
-              messages: { orderBy: { seq: "desc" }, take: 1 },
-            },
-          },
+          thread: { select: { id: true, unread: true } },
           runs: {
             where: {
               status: { in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"] },
@@ -179,8 +176,13 @@ export function createRepos(prisma: PrismaClient) {
         },
         orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       });
+      const latest = await latestMessageBlocks(
+        prisma,
+        actor,
+        bots.flatMap((bot) => (bot.thread ? [bot.thread.id] : [])),
+      );
       return bots.map((bot) => {
-        const blocks = (bot.thread?.messages[0]?.blocks ?? []) as Array<{
+        const blocks = (latest.get(bot.thread?.id ?? "") ?? []) as Array<{
           kind?: string;
           text?: string;
         }>;

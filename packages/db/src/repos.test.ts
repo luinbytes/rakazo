@@ -34,6 +34,7 @@ const baseBot = {
 
 function reposFor(memoryScope: string | null) {
   const prisma = {
+    $queryRaw: vi.fn(async () => []),
     bot: {
       findMany: vi.fn(async () => [{ ...baseBot, memoryScope }]),
     },
