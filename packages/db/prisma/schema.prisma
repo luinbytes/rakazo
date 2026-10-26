@@ -475,6 +475,8 @@ model Run {
   @@index([workspaceId, botId])
   @@index([sourceMessageId])
   @@index([threadId, status, createdAt])
+  // Partial index runs_recent_terminal_idx is created concurrently in SQL for recent activity:
+  // (workspaceId, userId, completedAt DESC, updatedAt DESC, id DESC), terminal statuses only.
   @@index([routineId])
   @@map("runs")
 }

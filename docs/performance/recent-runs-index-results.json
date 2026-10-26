@@ -1,0 +1,579 @@
+{
+  "base": "14bc82178b593f3575bbc023a441b9de4cd85e66",
+  "database": "PostgreSQL 16, local synthetic fixture only",
+  "readSampleCount": 7,
+  "stressReadSampleCount": 9,
+  "writeSampleCount": 5,
+  "readMeasurements": [
+    {
+      "seedMs": 28258.783568,
+      "rows": 400000
+    },
+    {
+      "sql": "SELECT \"public\".\"runs\".\"id\", \"public\".\"runs\".\"workspaceId\", \"public\".\"runs\".\"botId\", \"public\".\"runs\".\"threadId\", \"public\".\"runs\".\"taskId\", \"public\".\"runs\".\"userId\", \"public\".\"runs\".\"status\", \"public\".\"runs\".\"trigger\", \"public\".\"runs\".\"modelProvider\", \"public\".\"runs\".\"modelId\", \"public\".\"runs\".\"error\", \"public\".\"runs\".\"leaseOwner\", \"public\".\"runs\".\"leaseFence\", \"public\".\"runs\".\"leaseExpiresAt\", \"public\".\"runs\".\"checkpoint\", \"public\".\"runs\".\"clientNonce\", \"public\".\"runs\".\"sourceMessageId\", \"public\".\"runs\".\"routineId\", \"public\".\"runs\".\"startedAt\", \"public\".\"runs\".\"completedAt\", \"public\".\"runs\".\"createdAt\", \"public\".\"runs\".\"updatedAt\" FROM \"public\".\"runs\" LEFT JOIN \"public\".\"bots\" AS \"j0\" ON (\"j0\".\"id\") = (\"public\".\"runs\".\"botId\") WHERE (\"public\".\"runs\".\"workspaceId\" = $1 AND \"public\".\"runs\".\"userId\" = $2 AND (\"j0\".\"archivedAt\" IS NULL AND (\"j0\".\"id\" IS NOT NULL)) AND \"public\".\"runs\".\"status\" IN ($3,$4,$5)) ORDER BY \"public\".\"runs\".\"completedAt\" DESC, \"public\".\"runs\".\"updatedAt\" DESC, \"public\".\"runs\".\"id\" DESC LIMIT $6 OFFSET $7",
+      "params": ["runs-perf-w0", "user-0", "completed", "failed", "cancelled", "20", "0"]
+    },
+    {
+      "label": "baseline-mixed",
+      "medianMs": 40.315,
+      "size": {
+        "table_bytes": "72400896",
+        "index_bytes": "123650048",
+        "candidate_bytes": "0"
+      },
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 3590,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Sort",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Sort Key": ["runs.\"completedAt\" DESC", "runs.\"updatedAt\" DESC", "runs.id DESC"],
+              "Sort Method": "top-N heapsort",
+              "Shared Hit Blocks": 3590,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Join Type": "Inner",
+                  "Actual Rows": 14250,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 3590,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Heap Scan",
+                      "Actual Rows": 23750,
+                      "Actual Loops": 1,
+                      "Filter": "((\"userId\" = 'user-0'::text) AND (status = ANY ('{completed,failed,cancelled}'::text[])))",
+                      "Rows Removed by Filter": 26250,
+                      "Shared Hit Blocks": 3587,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Bitmap Index Scan",
+                          "Index Name": "runs_workspaceId_clientNonce_key",
+                          "Actual Rows": 50000,
+                          "Actual Loops": 1,
+                          "Index Cond": "(\"workspaceId\" = 'runs-perf-w0'::text)",
+                          "Shared Hit Blocks": 42,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Actual Rows": 128,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 3,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Actual Rows": 128,
+                          "Actual Loops": 1,
+                          "Filter": "((\"archivedAt\" IS NULL) AND (id IS NOT NULL))",
+                          "Rows Removed by Filter": 32,
+                          "Shared Hit Blocks": 3,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.419,
+        "Execution Time": 40.315
+      }
+    },
+    {
+      "candidate": "full",
+      "buildMs": 1651.2009519999992
+    },
+    {
+      "label": "full-mixed",
+      "medianMs": 0.177,
+      "size": {
+        "table_bytes": "72400896",
+        "index_bytes": "160071680",
+        "candidate_bytes": "36421632"
+      },
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 56,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Nested Loop",
+              "Join Type": "Inner",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 56,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Index Scan",
+                  "Scan Direction": "Forward",
+                  "Index Name": "runs_perf_candidate",
+                  "Actual Rows": 32,
+                  "Actual Loops": 1,
+                  "Index Cond": "((\"workspaceId\" = 'runs-perf-w0'::text) AND (\"userId\" = 'user-0'::text))",
+                  "Filter": "(status = ANY ('{completed,failed,cancelled}'::text[]))",
+                  "Rows Removed by Filter": 190,
+                  "Shared Hit Blocks": 36,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "Memoize",
+                  "Actual Rows": 1,
+                  "Actual Loops": 32,
+                  "Shared Hit Blocks": 20,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Index Scan",
+                      "Scan Direction": "Forward",
+                      "Index Name": "bots_pkey",
+                      "Actual Rows": 1,
+                      "Actual Loops": 10,
+                      "Index Cond": "((id = runs.\"botId\") AND (id IS NOT NULL))",
+                      "Filter": "(\"archivedAt\" IS NULL)",
+                      "Rows Removed by Filter": 0,
+                      "Shared Hit Blocks": 20,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.328,
+        "Execution Time": 0.177
+      }
+    },
+    {
+      "candidate": "partial",
+      "buildMs": 1309.590272999998
+    },
+    {
+      "label": "partial-mixed",
+      "medianMs": 0.063,
+      "size": {
+        "table_bytes": "72400896",
+        "index_bytes": "158253056",
+        "candidate_bytes": "34603008"
+      },
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 27,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Nested Loop",
+              "Join Type": "Inner",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 27,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Index Scan",
+                  "Scan Direction": "Forward",
+                  "Index Name": "runs_perf_candidate",
+                  "Actual Rows": 32,
+                  "Actual Loops": 1,
+                  "Index Cond": "((\"workspaceId\" = 'runs-perf-w0'::text) AND (\"userId\" = 'user-0'::text))",
+                  "Shared Hit Blocks": 7,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "Memoize",
+                  "Actual Rows": 1,
+                  "Actual Loops": 32,
+                  "Shared Hit Blocks": 20,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Index Scan",
+                      "Scan Direction": "Forward",
+                      "Index Name": "bots_pkey",
+                      "Actual Rows": 1,
+                      "Actual Loops": 10,
+                      "Index Cond": "((id = runs.\"botId\") AND (id IS NOT NULL))",
+                      "Filter": "(\"archivedAt\" IS NULL)",
+                      "Rows Removed by Filter": 0,
+                      "Shared Hit Blocks": 20,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.229,
+        "Execution Time": 0.063
+      }
+    },
+    {
+      "candidate": "status",
+      "buildMs": 1739.7357639999973
+    },
+    {
+      "label": "status-mixed",
+      "medianMs": 35.932,
+      "size": {
+        "table_bytes": "72400896",
+        "index_bytes": "163864576",
+        "candidate_bytes": "40214528"
+      },
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 3590,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Sort",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Sort Key": ["runs.\"completedAt\" DESC", "runs.\"updatedAt\" DESC", "runs.id DESC"],
+              "Sort Method": "top-N heapsort",
+              "Shared Hit Blocks": 3590,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Join Type": "Inner",
+                  "Actual Rows": 14250,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 3590,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Heap Scan",
+                      "Actual Rows": 23750,
+                      "Actual Loops": 1,
+                      "Filter": "((\"userId\" = 'user-0'::text) AND (status = ANY ('{completed,failed,cancelled}'::text[])))",
+                      "Rows Removed by Filter": 26250,
+                      "Shared Hit Blocks": 3587,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Bitmap Index Scan",
+                          "Index Name": "runs_workspaceId_clientNonce_key",
+                          "Actual Rows": 50000,
+                          "Actual Loops": 1,
+                          "Index Cond": "(\"workspaceId\" = 'runs-perf-w0'::text)",
+                          "Shared Hit Blocks": 42,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Actual Rows": 128,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 3,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Actual Rows": 128,
+                          "Actual Loops": 1,
+                          "Filter": "((\"archivedAt\" IS NULL) AND (id IS NOT NULL))",
+                          "Rows Removed by Filter": 32,
+                          "Shared Hit Blocks": 3,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.289,
+        "Execution Time": 35.932
+      }
+    },
+    {
+      "label": "baseline-prefix",
+      "medianMs": 38.793,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 3463,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Sort",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Sort Key": ["runs.\"completedAt\" DESC", "runs.\"updatedAt\" DESC", "runs.id DESC"],
+              "Sort Method": "top-N heapsort",
+              "Shared Hit Blocks": 3463,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Hash Join",
+                  "Join Type": "Inner",
+                  "Actual Rows": 14250,
+                  "Actual Loops": 1,
+                  "Shared Hit Blocks": 3463,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Bitmap Heap Scan",
+                      "Actual Rows": 23750,
+                      "Actual Loops": 1,
+                      "Filter": "((\"userId\" = 'user-0'::text) AND (status = ANY ('{completed,failed,cancelled}'::text[])))",
+                      "Rows Removed by Filter": 26250,
+                      "Shared Hit Blocks": 3460,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Bitmap Index Scan",
+                          "Index Name": "runs_workspaceId_clientNonce_key",
+                          "Actual Rows": 50000,
+                          "Actual Loops": 1,
+                          "Index Cond": "(\"workspaceId\" = 'runs-perf-w0'::text)",
+                          "Shared Hit Blocks": 54,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    },
+                    {
+                      "Node Type": "Hash",
+                      "Actual Rows": 128,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 3,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Seq Scan",
+                          "Actual Rows": 128,
+                          "Actual Loops": 1,
+                          "Filter": "((\"archivedAt\" IS NULL) AND (id IS NOT NULL))",
+                          "Rows Removed by Filter": 32,
+                          "Shared Hit Blocks": 3,
+                          "Shared Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.355,
+        "Execution Time": 38.793
+      }
+    },
+    {
+      "label": "partial-prefix",
+      "medianMs": 6.234,
+      "plan": {
+        "Plan": {
+          "Node Type": "Limit",
+          "Actual Rows": 20,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 1138,
+          "Shared Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Nested Loop",
+              "Join Type": "Inner",
+              "Actual Rows": 20,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 1138,
+              "Shared Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Index Scan",
+                  "Scan Direction": "Forward",
+                  "Index Name": "runs_perf_candidate",
+                  "Actual Rows": 9520,
+                  "Actual Loops": 1,
+                  "Index Cond": "((\"workspaceId\" = 'runs-perf-w0'::text) AND (\"userId\" = 'user-0'::text))",
+                  "Shared Hit Blocks": 1118,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0
+                },
+                {
+                  "Node Type": "Memoize",
+                  "Actual Rows": 0,
+                  "Actual Loops": 9520,
+                  "Shared Hit Blocks": 20,
+                  "Shared Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Index Scan",
+                      "Scan Direction": "Forward",
+                      "Index Name": "bots_pkey",
+                      "Actual Rows": 1,
+                      "Actual Loops": 10,
+                      "Index Cond": "((id = runs.\"botId\") AND (id IS NOT NULL))",
+                      "Filter": "(\"archivedAt\" IS NULL)",
+                      "Rows Removed by Filter": 0,
+                      "Shared Hit Blocks": 20,
+                      "Shared Read Blocks": 0,
+                      "Temp Written Blocks": 0
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Planning Time": 0.668,
+        "Execution Time": 6.234
+      }
+    }
+  ],
+  "writeMeasurements": [
+    {
+      "label": "baseline-writes",
+      "writeLifecycleMedian": {
+        "executionMs": 925.1579999999999,
+        "walBytes": 12880769
+      },
+      "samples": [
+        {
+          "executionMs": 889.2679999999999,
+          "walBytes": 12888062
+        },
+        {
+          "executionMs": 914.9350000000001,
+          "walBytes": 12910818
+        },
+        {
+          "executionMs": 925.1579999999999,
+          "walBytes": 12880769
+        },
+        {
+          "executionMs": 1030.556,
+          "walBytes": 12886918
+        },
+        {
+          "executionMs": 1180.9089999999999,
+          "walBytes": 36707303
+        }
+      ]
+    },
+    {
+      "label": "partial-writes",
+      "writeLifecycleMedian": {
+        "executionMs": 907.532,
+        "walBytes": 13067842
+      },
+      "samples": [
+        {
+          "executionMs": 817.7099999999999,
+          "walBytes": 13066744
+        },
+        {
+          "executionMs": 903.0269999999999,
+          "walBytes": 13059396
+        },
+        {
+          "executionMs": 907.532,
+          "walBytes": 13067842
+        },
+        {
+          "executionMs": 930.111,
+          "walBytes": 13061712
+        },
+        {
+          "executionMs": 968.099,
+          "walBytes": 13066394
+        }
+      ]
+    },
+    {
+      "label": "full-writes",
+      "writeLifecycleMedian": {
+        "executionMs": 942.591,
+        "walBytes": 15421040
+      },
+      "samples": [
+        {
+          "executionMs": 915.2310000000002,
+          "walBytes": 15425620
+        },
+        {
+          "executionMs": 930.0230000000001,
+          "walBytes": 15420938
+        },
+        {
+          "executionMs": 942.591,
+          "walBytes": 15421040
+        },
+        {
+          "executionMs": 951.9470000000001,
+          "walBytes": 15413178
+        },
+        {
+          "executionMs": 1039.0919999999999,
+          "walBytes": 15430596
+        }
+      ]
+    }
+  ],
+  "note": "Relevant EXPLAIN fields retained; benchmark emits full EXPLAIN JSON. Read and verified 1000-row lifecycle measurements used the same synthetic history; write phases were rerun with affected-row assertions."
+}
