@@ -55,4 +55,43 @@ describe("projectBotMentions", () => {
     expect(view.visibleMessages.map((message) => message.id)).toEqual(["a", "b"]);
     expect(view.mentions.size).toBe(0);
   });
+
+  it("folds consecutive announcements in order and stops at another speaker", () => {
+    const second: MessageBlock = { ...created, botId: "second", name: "Second" };
+    const view = projectBotMentions([
+      bot("a", [created]),
+      bot("b", [second]),
+      bot("tool", [{ kind: "steps", steps: [] }]),
+      bot("reply", [text("Ready")]),
+      bot("c", [created]),
+      bot("other", [text("Hello")], "other"),
+      bot("later", [text("Later")]),
+    ]);
+    expect(view.mentions.get("reply")).toEqual([created, second]);
+    expect([...view.foldedInto]).toEqual([
+      ["a", "reply"],
+      ["b", "reply"],
+    ]);
+    expect(view.visibleMessages.map((message) => message.id)).toEqual([
+      "tool",
+      "reply",
+      "c",
+      "other",
+      "later",
+    ]);
+  });
+
+  it("reads message entries linearly for a long pending announcement run", () => {
+    const messages = Array.from({ length: 1000 }, (_, index) => bot(String(index), [created]));
+    let reads = 0;
+    const observed = new Proxy(messages, {
+      get(target, property, receiver) {
+        if (typeof property === "string" && /^\d+$/.test(property)) reads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const view = projectBotMentions(observed);
+    expect(view.visibleMessages).toHaveLength(messages.length);
+    expect(reads).toBeLessThanOrEqual(messages.length * 3);
+  });
 });
